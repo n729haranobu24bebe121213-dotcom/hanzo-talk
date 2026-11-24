@@ -1,0 +1,813 @@
+
+
+<!DOCTYPE html>
+
+<html lang="ja">
+
+<head>
+
+  <base target="_top">
+
+  <meta charset="UTF-8">
+
+  <meta name="viewport"
+
+    content="width=device-width, initial-scale=1.0">
+
+  <title>半蔵会話サポート</title>
+
+  <style>
+
+    * {
+
+      box-sizing: border-box;
+
+    }
+
+    body {
+
+      margin: 0;
+
+      padding: 15px;
+
+      background: #f0f2f5;
+
+      font-family: sans-serif;
+
+      color: #111;
+
+    }
+
+    h1 {
+
+      font-size: 22px;
+
+      text-align: center;
+
+      margin: 8px 0;
+
+    }
+
+    #status {
+
+      text-align: center;
+
+      font-size: 18px;
+
+      margin: 10px;
+
+      color: #555;
+
+    }
+
+    #display {
+
+      background: white;
+
+      border: 2px solid #ccc;
+
+      border-radius: 12px;
+
+      min-height: 48vh;
+
+      max-height: 65vh;
+
+      overflow-y: auto;
+
+      padding: 20px;
+
+      font-size: 64px;
+
+      font-weight: bold;
+
+      line-height: 1.4;
+
+      overflow-wrap: anywhere;
+
+      white-space: pre-wrap;
+
+    }
+
+    .buttons {
+
+      display: flex;
+
+      gap: 10px;
+
+      margin-top: 12px;
+
+    }
+
+    button {
+
+      border: none;
+
+      border-radius: 10px;
+
+      padding: 16px;
+
+      font-size: 22px;
+
+      font-weight: bold;
+
+      cursor: pointer;
+
+      touch-action: manipulation;
+
+    }
+
+    .buttons button {
+
+      flex: 1;
+
+    }
+
+    #start {
+
+      background: #237a46;
+
+      color: white;
+
+    }
+
+    #stop {
+
+      background: #bd3535;
+
+      color: white;
+
+    }
+
+    #clear {
+
+      background: #555;
+
+      color: white;
+
+    }
+
+    .settings {
+
+      background: white;
+
+      border-radius: 10px;
+
+      padding: 15px;
+
+      margin-top: 15px;
+
+    }
+
+    input[type="range"] {
+
+      width: 100%;
+
+      margin: 15px 0;
+
+    }
+
+    input[type="text"] {
+
+      width: 100%;
+
+      font-size: 22px;
+
+      padding: 12px;
+
+      border: 1px solid #aaa;
+
+      border-radius: 8px;
+
+      margin: 8px 0;
+
+    }
+
+    #phrases {
+
+      display: grid;
+
+      grid-template-columns: repeat(2, 1fr);
+
+      gap: 8px;
+
+      margin-top: 12px;
+
+    }
+
+    .phrase {
+
+      background: #dce9f7;
+
+      color: #111;
+
+      width: 100%;
+
+    }
+
+    .add {
+
+      background: #245b96;
+
+      color: white;
+
+    }
+
+    .delete {
+
+      background: #eee;
+
+      color: #555;
+
+      font-size: 16px;
+
+      padding: 8px;
+
+      width: 100%;
+
+      margin-top: 4px;
+
+    }
+
+    summary {
+
+      font-size: 20px;
+
+      font-weight: bold;
+
+      cursor: pointer;
+
+    }
+
+    button:disabled {
+
+      opacity: 0.4;
+
+    }
+
+  </style>
+
+</head>
+
+<body>
+
+  <h1>半蔵会話サポート Ver.0.1</h1>
+
+  <div id="status">待機中</div>
+
+  <div id="display">
+
+    ここに会話が表示されます
+
+  </div>
+
+  <div class="buttons">
+
+    <button id="start" onclick="startVoice()">
+
+      ● 開始
+
+    </button>
+
+    <button id="stop" onclick="stopVoice()">
+
+      ■ 停止
+
+    </button>
+
+    <button id="clear" onclick="clearText()">
+
+      消去
+
+    </button>
+
+  </div>
+
+  <div id="phrases"></div>
+
+  <details class="settings">
+
+    <summary>文字サイズ・文章登録</summary>
+
+    <p>
+
+      文字サイズ：
+
+      <span id="sizeValue">64</span>
+
+    </p>
+
+    <input
+
+      type="range"
+
+      id="fontSize"
+
+      min="32"
+
+      max="120"
+
+      step="4"
+
+      value="64"
+
+      oninput="changeSize(this.value)"
+
+    >
+
+    <p>よく使う文章を登録</p>
+
+    <input
+
+      type="text"
+
+      id="newPhrase"
+
+      placeholder="文章を入力してください"
+
+    >
+
+    <button class="add" onclick="addPhrase()">
+
+      文章を登録
+
+    </button>
+
+  </details>
+
+  <script>
+
+    const display = document.getElementById("display");
+
+    const status = document.getElementById("status");
+
+    const SpeechRecognition =
+
+      window.SpeechRecognition ||
+
+      window.webkitSpeechRecognition;
+
+    let recognition = null;
+
+    let listening = false;
+
+    let active = false;
+
+    let restartTimer = null;
+
+    let lastFinal = "";
+
+    let clearBefore = 0;
+
+    // 設定の保存と読み込み
+
+    function loadSetting(key, fallback) {
+
+      try {
+
+        const value = localStorage.getItem(key);
+
+        return value === null
+
+          ? fallback
+
+          : JSON.parse(value);
+
+      } catch (e) {
+
+        return fallback;
+
+      }
+
+    }
+
+    function saveSetting(key, value) {
+
+      try {
+
+        localStorage.setItem(
+
+          key,
+
+          JSON.stringify(value)
+
+        );
+
+      } catch (e) {
+
+        console.log("設定を保存できませんでした");
+
+      }
+
+    }
+
+    // 文字サイズ
+
+    function changeSize(size) {
+
+      display.style.fontSize = size + "px";
+
+      document.getElementById("sizeValue")
+
+        .textContent = size;
+
+      document.getElementById("fontSize")
+
+        .value = size;
+
+      saveSetting("hanzoFontSize", Number(size));
+
+    }
+
+    changeSize(loadSetting("hanzoFontSize", 64));
+
+    // 音声認識
+
+    function setupRecognition() {
+
+      if (!SpeechRecognition) {
+
+        status.textContent =
+
+          "このブラウザは音声認識に対応していません";
+
+        return false;
+
+      }
+
+      recognition = new SpeechRecognition();
+
+      recognition.lang = "ja-JP";
+
+      recognition.continuous = true;
+
+      recognition.interimResults = true;
+
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = function () {
+
+        active = true;
+
+        clearBefore = 0;
+
+        status.textContent = "● 音声認識中";
+
+        status.style.color = "#237a46";
+
+      };
+
+      recognition.onresult = function (event) {
+
+        if (!listening) return;
+
+        let interim = "";
+
+        let finalText = "";
+
+        for (
+
+          let i = event.resultIndex;
+
+          i < event.results.length;
+
+          i++
+
+        ) {
+
+          if (i < clearBefore) continue;
+
+          const result = event.results[i];
+
+          const text = result[0].transcript;
+
+          if (result.isFinal) {
+
+            finalText += text;
+
+          } else {
+
+            interim += text;
+
+          }
+
+        }
+
+        if (finalText.trim()) {
+
+          lastFinal = finalText;
+
+        }
+
+        const text = interim
+
+          ? interim
+
+          : lastFinal;
+
+        if (text.trim()) {
+
+          display.textContent = text;
+
+          display.scrollTop = display.scrollHeight;
+
+        }
+
+      };
+
+      recognition.onerror = function (event) {
+
+        if (!listening) return;
+
+        if (event.error === "no-speech") {
+
+          status.textContent = "会話を待っています";
+
+          return;
+
+        }
+
+        listening = false;
+
+        clearTimeout(restartTimer);
+
+        status.textContent =
+
+          "音声認識エラー：" + event.error;
+
+        status.style.color = "#bd3535";
+
+        updateButtons();
+
+      };
+
+      recognition.onend = function () {
+
+        active = false;
+
+        if (listening) {
+
+          status.textContent = "音声認識を再開中";
+
+          restartTimer = setTimeout(function () {
+
+            if (!listening) return;
+
+            try {
+
+              recognition.start();
+
+            } catch (e) {
+
+              listening = false;
+
+              status.textContent =
+
+                "開始ボタンを押してください";
+
+              updateButtons();
+
+            }
+
+          }, 500);
+
+        } else {
+
+          updateButtons();
+
+        }
+
+      };
+
+      return true;
+
+    }
+
+    // 開始ボタン
+
+    function startVoice() {
+
+      if (listening || active) return;
+
+      if (!recognition) {
+
+        if (!setupRecognition()) return;
+
+      }
+
+      listening = true;
+
+      lastFinal = "";
+
+      status.textContent = "音声認識を準備中";
+
+      updateButtons();
+
+      try {
+
+        recognition.start();
+
+      } catch (e) {
+
+        listening = false;
+
+        status.textContent =
+
+          "音声認識を開始できませんでした";
+
+        updateButtons();
+
+      }
+
+    }
+
+    // 停止ボタン
+
+    function stopVoice() {
+
+      listening = false;
+
+      clearTimeout(restartTimer);
+
+      if (recognition) {
+
+        try {
+
+          recognition.abort();
+
+        } catch (e) {
+
+          console.log(e);
+
+        }
+
+      }
+
+      status.textContent = "停止中";
+
+      status.style.color = "#555";
+
+      updateButtons();
+
+    }
+
+    function updateButtons() {
+
+      document.getElementById("start")
+
+        .disabled = listening || active;
+
+      document.getElementById("stop")
+
+        .disabled = !listening;
+
+    }
+
+    // 文字消去
+
+    function clearText() {
+
+      display.textContent = "";
+
+      lastFinal = "";
+
+    }
+
+    // 定型文マスタ
+
+    let phrases = loadSetting(
+
+      "hanzoPhrases",
+
+      [
+
+        "お母さん、ご飯だよ。",
+
+        "お茶を飲む？",
+
+        "お風呂に入ってね。",
+
+        "出かけてくるね。",
+
+        "何か欲しいものはある？",
+
+        "ありがとう。"
+
+      ]
+
+    );
+
+    // 定型文の表示
+
+    function showPhrase(text) {
+
+      stopVoice();
+
+      display.textContent = text;
+
+      display.scrollTop = 0;
+
+      status.textContent = "登録文章を表示中";
+
+    }
+
+    // 定型文ボタンの作成
+
+    function renderPhrases() {
+
+      const area =
+
+        document.getElementById("phrases");
+
+      area.innerHTML = "";
+
+      phrases.forEach(function (text, index) {
+
+        const box = document.createElement("div");
+
+        const button =
+
+          document.createElement("button");
+
+        button.className = "phrase";
+
+        button.textContent = text;
+
+        button.onclick = function () {
+
+          showPhrase(text);
+
+        };
+
+        const del =
+
+          document.createElement("button");
+
+        del.className = "delete";
+
+        del.textContent = "削除";
+
+        del.onclick = function () {
+
+          deletePhrase(index);
+
+        };
+
+        box.appendChild(button);
+
+        box.appendChild(del);
+
+        area.appendChild(box);
+
+      });
+
+    }
+
+    // 定型文の追加
+
+    function addPhrase() {
+
+      const input =
+
+        document.getElementById("newPhrase");
+
+      const text = input.value.trim();
+
+      if (!text) return;
+
+      phrases.push(text);
+
+      saveSetting("hanzoPhrases", phrases);
+
+      input.value = "";
+
+      renderPhrases();
+
+    }
+
+    // 定型文の削除
+
+    function deletePhrase(index) {
+
+      if (!confirm("この文章を削除しますか？")) {
+
+        return;
+
+      }
+
+      phrases.splice(index, 1);
+
+      saveSetting("hanzoPhrases", phrases);
+
+      renderPhrases();
+
+    }
+
+    renderPhrases();
+
+    updateButtons();
+
+  </script>
+
+</body>
+
+</html>
